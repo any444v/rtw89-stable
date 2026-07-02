@@ -116,6 +116,12 @@ static const struct pci_device_id rtw89_8852ce_id_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, rtw89_8852ce_id_table);
 
+#ifdef RTW89_MACOS
+/* macOS port: expose the id table so feixiao.c can match the chip
+ * without the Linux PCI driver model. */
+const struct pci_device_id *rtw89_8852ce_feixiao_ids = rtw89_8852ce_id_table;
+#endif
+
 static struct pci_driver rtw89_8852ce_driver = {
 	.name		= "rtw89_8852ce",
 	.id_table	= rtw89_8852ce_id_table,
