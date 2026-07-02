@@ -9,9 +9,23 @@
 #include "reg.h"
 #include "ser.h"
 
+#ifdef RTW89_MACOS
+/* macOS port: default CLKREQ/ASPM L1/L1SS OFF.  On this platform the PCIe
+ * link's CLKREQ#/L1-substate handshake is unreliable; letting the link enter
+ * ASPM L1 stalls the device's bus-master DMA (TX and RX freeze together)
+ * while MMIO/config access still works — exactly the "device loss if HW
+ * misbehaves on the link" case the comment in rtw89_pci_link_cfg() warns
+ * about.  Keeping the chip's CLKREQ/ASPM/L1SS modules disabled holds the
+ * link in L0 so DMA never stalls.  Same fix as the rtw88 port's
+ * rtw_pci_disable_aspm default. */
+static bool rtw89_pci_disable_clkreq = true;
+static bool rtw89_pci_disable_aspm_l1 = true;
+static bool rtw89_pci_disable_l1ss = true;
+#else
 static bool rtw89_pci_disable_clkreq;
 static bool rtw89_pci_disable_aspm_l1;
 static bool rtw89_pci_disable_l1ss;
+#endif
 module_param_named(disable_clkreq, rtw89_pci_disable_clkreq, bool, 0644);
 module_param_named(disable_aspm_l1, rtw89_pci_disable_aspm_l1, bool, 0644);
 module_param_named(disable_aspm_l1ss, rtw89_pci_disable_l1ss, bool, 0644);
