@@ -1515,6 +1515,17 @@ static int rtw89_mac_power_switch(struct rtw89_dev *rtwdev, bool on)
 	int (*cfg_func)(struct rtw89_dev *rtwdev);
 	int ret;
 
+#ifdef __APPLE__
+	/* macOS: skip the power-off sequence when the chip is already powered
+	 * down.  On a warm reboot the off-sequence issues MMIO to a PCIe
+	 * function whose power was never brought back up; on x86_64 Mac the
+	 * next MMIO read receives an Unsupported Request (UR) and causes a
+	 * fatal page fault (trap 14).  Mirrors the rtw88 port's guard in
+	 * rtw_mac_power_switch. */
+	if (!on && !test_bit(RTW89_FLAG_POWERON, rtwdev->flags))
+		return 0;
+#endif
+
 	rtw89_mac_power_switch_boot_mode(rtwdev);
 
 	if (on) {
