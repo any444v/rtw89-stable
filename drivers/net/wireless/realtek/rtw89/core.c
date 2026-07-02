@@ -3831,12 +3831,19 @@ EXPORT_SYMBOL(rtw89_core_napi_stop);
 
 int rtw89_core_napi_init(struct rtw89_dev *rtwdev)
 {
+#ifdef RTW89_MACOS
+	/* macOS port: no netdev exists; the NAPI shim only needs the poll
+	 * callback.  Mirrors the rtw88 port's rtw_pci_napi_init. */
+	rtwdev->netdev = NULL;
+	netif_napi_add(NULL, &rtwdev->napi, rtwdev->hci.ops->napi_poll);
+#else
 	rtwdev->netdev = alloc_netdev_dummy(0);
 	if (!rtwdev->netdev)
 		return -ENOMEM;
 
 	netif_napi_add(rtwdev->netdev, &rtwdev->napi,
 		       rtwdev->hci.ops->napi_poll);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(rtw89_core_napi_init);
@@ -3845,7 +3852,10 @@ void rtw89_core_napi_deinit(struct rtw89_dev *rtwdev)
 {
 	rtw89_core_napi_stop(rtwdev);
 	netif_napi_del(&rtwdev->napi);
-	free_netdev(rtwdev->netdev);
+	if (rtwdev->netdev) {
+		free_netdev(rtwdev->netdev);
+		rtwdev->netdev = NULL;
+	}
 }
 EXPORT_SYMBOL(rtw89_core_napi_deinit);
 
