@@ -4665,6 +4665,12 @@ static void rtw89_track_ps_work(struct wiphy *wiphy, struct wiphy_work *work)
 		rtw89_enter_lps_track(rtwdev);
 }
 
+/* macOS port diagnostic: when true, the track work keeps ticking (so timing
+ * is unchanged) but skips all of its RF-dynamic work (RA/DIG/CFO/TSSI track)
+ * and coex queries.  Used to test whether a periodic RF routine is wedging
+ * the TX DMA engine after a few seconds.  Defined in feixiao.c. */
+extern bool rtw89_disable_track_work;
+
 static void rtw89_track_work(struct wiphy *wiphy, struct wiphy_work *work)
 {
 	struct rtw89_dev *rtwdev = container_of(work, struct rtw89_dev,
@@ -4681,6 +4687,10 @@ static void rtw89_track_work(struct wiphy *wiphy, struct wiphy_work *work)
 
 	wiphy_delayed_work_queue(wiphy, &rtwdev->track_work,
 				 RTW89_TRACK_WORK_PERIOD);
+
+	/* Diagnostic: skip all RF-dynamic work + coex queries. */
+	if (rtw89_disable_track_work)
+		return;
 
 	tfc_changed = rtw89_traffic_stats_track(rtwdev);
 	if (rtwdev->scanning)
