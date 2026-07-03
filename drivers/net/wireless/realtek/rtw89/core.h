@@ -6914,6 +6914,14 @@ __rtw89_vif_rcu_dereference_link(struct rtw89_vif_link *rtwvif_link, bool *nolin
 
 	bss_conf = rcu_dereference(vif->link_conf[rtwvif_link->link_id]);
 
+	if (!bss_conf) {
+		bss_conf = kzalloc(sizeof(struct ieee80211_bss_conf), GFP_ATOMIC);
+		if (bss_conf) {
+			vif->link_conf[rtwvif_link->link_id] = bss_conf;
+			vif->valid_links |= BIT(rtwvif_link->link_id);
+		}
+	}
+
 out:
 	if (unlikely(!bss_conf)) {
 		*nolink = true;
