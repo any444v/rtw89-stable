@@ -6440,7 +6440,7 @@ rtw89_assoc_link_rcu_dereference(struct rtw89_dev *rtwdev, u8 macid)
 #define rtw89_get_designated_link(links_holder) \
 ({ \
 	typeof(links_holder) p = links_holder; \
-	list_first_entry_or_null(&p->dlink_pool, typeof(*p->links_inst), dlink_schd); \
+	&p->links_inst[0]; \
 })
 
 static inline void rtw89_tx_wait_release(struct rtw89_tx_wait_info *wait)
