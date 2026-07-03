@@ -738,8 +738,14 @@ int rtw89_regd_init_hint(struct rtw89_dev *rtwdev)
 		return 0;
 	}
 
-	rtw89_debug_regd(rtwdev, rtwdev->regulatory.regd,
-			 "worldwide roaming chip, follow the setting of stack");
+	if (chip_regd) {
+		rtw89_debug_regd(rtwdev, chip_regd,
+			"worldwide roaming chip, follow the setting of stack");
+	} else {
+		// Fallback simple print that doesn't dereference a regd struct
+		rtw89_debug(rtwdev, RTW89_DBG_REGD,
+			"worldwide roaming chip, follow the setting of stack (no regd)\n");
+	}
 	return 0;
 }
 
