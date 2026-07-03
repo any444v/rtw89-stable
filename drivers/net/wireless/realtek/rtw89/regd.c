@@ -689,6 +689,9 @@ int rtw89_regd_setup(struct rtw89_dev *rtwdev)
 	const struct rtw89_regd_data *regd_data = elm_info->regd;
 	struct wiphy *wiphy = rtwdev->hw->wiphy;
 
+	if (!regulatory->regd)
+		regulatory->regd = &rtw89_ww_regd;
+
 	if (regd_data) {
 		regulatory->ctrl.nr = regd_data->nr;
 		regulatory->ctrl.map = regd_data->map;
