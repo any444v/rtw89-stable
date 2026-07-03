@@ -16,22 +16,24 @@
 #include "util.h"
 #include "wow.h"
 
+static struct ieee80211_vif *feixiao_global_vif = NULL;
+
 static void rtw89_ops_tx(struct ieee80211_hw *hw,
 			 struct ieee80211_tx_control *control,
 			 struct sk_buff *skb)
 {
 	struct rtw89_dev *rtwdev = hw->priv;
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
-	/* If Feixiao didn't pass the vif to control, we use the default one from hw */
-	if (!control->vif || (unsigned long)control->vif < 0x1000) {
-		if (!list_empty(&hw->interfaces)) {
-			control->vif = list_first_entry(&hw->interfaces, struct ieee80211_vif, list);
-			info->control.vif = control->vif; // Let's sync just in case
+
+	if (!info->control.vif) {
+		if (feixiao_global_vif) {
+			info->control.vif = feixiao_global_vif;
 		} else {
 			ieee80211_free_txskb(hw, skb);
-			return;
+			return; // We drop the packet if the interface hasn't been brought up yet
 		}
 	}
+
 	struct ieee80211_vif *vif = info->control.vif;
 	struct rtw89_vif *rtwvif = vif_to_rtwvif(vif);
 	struct ieee80211_sta *sta = control->sta;
@@ -114,6 +116,8 @@ static int rtw89_ops_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 static int __rtw89_ops_add_iface_link(struct rtw89_dev *rtwdev,
 				      struct rtw89_vif_link *rtwvif_link)
 {
+    feixiao_global_vif = vif;
+
 	struct ieee80211_bss_conf *bss_conf;
 	int ret;
 
