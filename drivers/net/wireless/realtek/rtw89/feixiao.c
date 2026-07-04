@@ -277,6 +277,11 @@ void rtw88_force_wifi_only(void)
 	pr_info("rtw89: forcing wifi-only (BTC manual control)\n");
 }
 
+/* Single STA chanctx emulating mac80211's add/assign flow (the kext
+ * never calls the chanctx ops itself). */
+static struct ieee80211_chanctx_conf *feixiao_chanctx;
+static bool feixiao_chanctx_added;
+
 /* Set channel + BSSID for the kext's connect flow (it bypasses mac80211's
  * bss_info_changed path).  Caller populates hw->conf.chandef first, same
  * contract as the rtw88 version. */
@@ -298,14 +303,57 @@ void rtw88_connect_hw_setup(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	rtw89_leave_lps(rtwdev);
 
-	/* rtw89 has no non-chanctx channel path: rtw89_set_channel() reads
-	 * hal.chanctx[].chandef, which only mac80211's chanctx ops normally
-	 * fill.  The kext bypasses those, so mirror hw->conf.chandef into
-	 * the entity state here — otherwise the radio stays on the boot
-	 * default channel and auth frames never reach the AP. */
+	/* Emulate mac80211's chanctx flow (add_chanctx + assign_vif_chanctx).
+	 * That is where rtw89 hooks mgnt-role bookkeeping, TAS and — via the
+	 * assign wrapper — the full per-channel RF calibration (IQK/DPK/
+	 * TSSI).  Only configuring the entity chandef tunes the synthesizer
+	 * but leaves the RF front-end uncalibrated for the target channel:
+	 * RX still hears beacons, TX is crippled and the AP never answers.
+	 * The chanctx is pinned to RTW89_CHANCTX_0 (single-vif kext), which
+	 * also keeps rtw89_chanctx_ops_add()'s find_first_zero_bit from
+	 * tripping over a bit the sw-scan bridge may already have set. */
+	if (!feixiao_chanctx) {
+		feixiao_chanctx = kzalloc(sizeof(*feixiao_chanctx) +
+					  hw->chanctx_data_size, GFP_KERNEL);
+		if (!feixiao_chanctx) {
+			rtw89_err(rtwdev, "connect: no mem for chanctx\n");
+			return;
+		}
+	}
+	feixiao_chanctx->def = hw->conf.chandef;
+
+	if (!feixiao_chanctx_added) {
+		struct rtw89_chanctx_cfg *cfg =
+			(struct rtw89_chanctx_cfg *)feixiao_chanctx->drv_priv;
+
+		cfg->idx = RTW89_CHANCTX_0;
+		cfg->ref_count = 0;
+		rtwdev->hal.chanctx[RTW89_CHANCTX_0].cfg = cfg;
+		feixiao_chanctx_added = true;
+	}
 	rtw89_config_entity_chandef(rtwdev, RTW89_CHANCTX_0,
-				    &hw->conf.chandef);
+				    &feixiao_chanctx->def);
+
+	if (!rtwvif_link->chanctx_assigned) {
+		if (rtw89_chanctx_ops_assign_vif(rtwdev, rtwvif_link,
+						 feixiao_chanctx)) {
+			rtw89_err(rtwdev, "connect: assign chanctx failed\n");
+			return;
+		}
+		/* Same as rtw89_ops_assign_vif_chanctx(): calibrate the RF
+		 * front-end for the channel we are about to camp on. */
+		rtw89_chip_rfk_channel(rtwdev, rtwvif_link);
+	}
+
 	rtw89_set_channel(rtwdev);
+
+	{
+		const struct rtw89_chan *cur =
+			rtw89_chan_get(rtwdev, rtwvif_link->chanctx_idx);
+
+		rtw89_info(rtwdev, "connect: tuned primary ch %u band %u bw %u\n",
+			   cur->primary_channel, cur->band_type, cur->band_width);
+	}
 
 	/* BSSID goes to the address CAM via H2C, not an MMIO port register
 	 * like rtw88's PORT_SET_BSSID. */
@@ -321,6 +369,21 @@ void rtw88_restore_connected_hw(struct ieee80211_hw *hw,
 				const uint8_t *bssid)
 {
 	rtw88_connect_hw_setup(hw, vif, bssid);
+}
+
+/* Undo the connect-flow chanctx emulation.  mac80211 guarantees
+ * unassign_vif_chanctx before remove_interface; the kext does not, so
+ * rtw89_ops_remove_interface() calls this to unlink the vif from the
+ * mgnt bookkeeping before its memory goes away. */
+void rtw88_release_chanctx(struct rtw89_dev *rtwdev,
+			   struct rtw89_vif_link *rtwvif_link)
+{
+	if (!feixiao_chanctx || !rtwvif_link->chanctx_assigned)
+		return;
+
+	rtw89_chanctx_ops_unassign_vif(rtwdev, rtwvif_link, feixiao_chanctx);
+	rtw89_chanctx_ops_remove(rtwdev, feixiao_chanctx);
+	feixiao_chanctx_added = false;
 }
 
 /* ------------------------------------------------------------------ */

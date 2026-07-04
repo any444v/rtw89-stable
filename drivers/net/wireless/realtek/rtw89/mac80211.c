@@ -16,6 +16,10 @@
 #include "util.h"
 #include "wow.h"
 
+/* feixiao.c — releases the kext-managed chanctx before vif teardown. */
+void rtw88_release_chanctx(struct rtw89_dev *rtwdev,
+			   struct rtw89_vif_link *rtwvif_link);
+
 static void rtw89_ops_tx(struct ieee80211_hw *hw,
 			 struct ieee80211_tx_control *control,
 			 struct sk_buff *skb)
@@ -269,6 +273,11 @@ static void rtw89_ops_remove_interface(struct ieee80211_hw *hw,
 			  __func__, RTW89_VIF_IDLE_LINK_ID);
 		goto bottom;
 	}
+
+	/* The Feixiao kext never calls unassign_vif_chanctx — release the
+	 * connect-flow chanctx (feixiao.c) so the vif is off the mgnt
+	 * active list before its memory is freed by the kext. */
+	rtw88_release_chanctx(rtwdev, rtwvif_link);
 
 	__rtw89_ops_remove_iface_link(rtwdev, rtwvif_link);
 
