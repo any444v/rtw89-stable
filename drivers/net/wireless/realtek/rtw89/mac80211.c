@@ -16,29 +16,26 @@
 #include "util.h"
 #include "wow.h"
 
-static struct ieee80211_vif *feixiao_global_vif = NULL;
-
 static void rtw89_ops_tx(struct ieee80211_hw *hw,
 			 struct ieee80211_tx_control *control,
 			 struct sk_buff *skb)
 {
 	struct rtw89_dev *rtwdev = hw->priv;
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
-
-	if (!info->control.vif) {
-		if (feixiao_global_vif) {
-			info->control.vif = feixiao_global_vif;
-		} else {
-			ieee80211_free_txskb(hw, skb);
-			return; // We drop the packet if the interface hasn't been brought up yet
-		}
-	}
-
 	struct ieee80211_vif *vif = info->control.vif;
-	struct rtw89_vif *rtwvif = vif_to_rtwvif(vif);
+	struct rtw89_vif *rtwvif;
 	struct ieee80211_sta *sta = control->sta;
-	u32 flags = IEEE80211_SKB_CB(skb)->flags;
+	u32 flags = info->flags;
 	int ret, qsel;
+
+	/* The Feixiao kext sets info->control.vif on every frame it submits;
+	 * NULL means TX raced interface bring-up/teardown — drop the frame
+	 * instead of dereferencing. */
+	if (!vif) {
+		ieee80211_free_txskb(hw, skb);
+		return;
+	}
+	rtwvif = vif_to_rtwvif(vif);
 
 	if (rtwvif->offchan && !(flags & IEEE80211_TX_CTL_TX_OFFCHAN) && sta) {
 		struct rtw89_sta *rtwsta = sta_to_rtwsta(sta);
@@ -116,8 +113,6 @@ static int rtw89_ops_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 static int __rtw89_ops_add_iface_link(struct rtw89_dev *rtwdev,
 				      struct rtw89_vif_link *rtwvif_link)
 {
-    feixiao_global_vif = vif;
-
 	struct ieee80211_bss_conf *bss_conf;
 	int ret;
 

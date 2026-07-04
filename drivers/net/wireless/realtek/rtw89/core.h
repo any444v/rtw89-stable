@@ -6440,7 +6440,7 @@ rtw89_assoc_link_rcu_dereference(struct rtw89_dev *rtwdev, u8 macid)
 #define rtw89_get_designated_link(links_holder) \
 ({ \
 	typeof(links_holder) p = links_holder; \
-	&p->links_inst[0]; \
+	list_first_entry_or_null(&p->dlink_pool, typeof(*p->links_inst), dlink_schd); \
 })
 
 static inline void rtw89_tx_wait_release(struct rtw89_tx_wait_info *wait)
@@ -6913,14 +6913,6 @@ __rtw89_vif_rcu_dereference_link(struct rtw89_vif_link *rtwvif_link, bool *nolin
 	}
 
 	bss_conf = rcu_dereference(vif->link_conf[rtwvif_link->link_id]);
-
-	if (!bss_conf) {
-		bss_conf = kzalloc(sizeof(struct ieee80211_bss_conf), GFP_ATOMIC);
-		if (bss_conf) {
-			vif->link_conf[rtwvif_link->link_id] = bss_conf;
-			vif->valid_links |= BIT(rtwvif_link->link_id);
-		}
-	}
 
 out:
 	if (unlikely(!bss_conf)) {
