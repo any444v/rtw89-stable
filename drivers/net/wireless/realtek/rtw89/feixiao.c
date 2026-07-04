@@ -217,9 +217,17 @@ void rtw88_sw_scan_start(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 
 void rtw88_sw_scan_switch_channel(struct ieee80211_hw *hw)
 {
+	struct rtw89_dev *rtwdev;
+
 	if (!hw || !hw->priv)
 		return;
-	rtw89_set_channel(to_rtw89(hw->priv));
+	rtwdev = to_rtw89(hw->priv);
+
+	/* rtw89 derives the channel from its entity state, not hw->conf —
+	 * mirror the chandef the kext just wrote before programming. */
+	rtw89_config_entity_chandef(rtwdev, RTW89_CHANCTX_0,
+				    &hw->conf.chandef);
+	rtw89_set_channel(rtwdev);
 }
 
 void rtw88_sw_scan_complete(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
@@ -289,6 +297,14 @@ void rtw88_connect_hw_setup(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		return;
 
 	rtw89_leave_lps(rtwdev);
+
+	/* rtw89 has no non-chanctx channel path: rtw89_set_channel() reads
+	 * hal.chanctx[].chandef, which only mac80211's chanctx ops normally
+	 * fill.  The kext bypasses those, so mirror hw->conf.chandef into
+	 * the entity state here — otherwise the radio stays on the boot
+	 * default channel and auth frames never reach the AP. */
+	rtw89_config_entity_chandef(rtwdev, RTW89_CHANCTX_0,
+				    &hw->conf.chandef);
 	rtw89_set_channel(rtwdev);
 
 	/* BSSID goes to the address CAM via H2C, not an MMIO port register
