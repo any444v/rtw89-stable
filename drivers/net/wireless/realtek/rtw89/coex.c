@@ -916,6 +916,9 @@ static int _send_fw_cmd(struct rtw89_dev *rtwdev, u8 h2c_class, u8 h2c_func,
 #define BTC_BT_DEF_BR_TX_PWR 4
 #define BTC_BT_DEF_LE_TX_PWR 4
 
+/* feixiao.c — true when the kext requested wifi-only operation. */
+bool rtw88_btc_manual_sticky(void);
+
 static void _reset_btc_var(struct rtw89_dev *rtwdev, u8 type)
 {
 	struct rtw89_btc *btc = &rtwdev->btc;
@@ -937,7 +940,17 @@ static void _reset_btc_var(struct rtw89_dev *rtwdev, u8 type)
 
 	if (type & BTC_RESET_CTRL) {
 		memset(&btc->ctrl, 0, sizeof(btc->ctrl));
-		btc->manual_ctrl = false;
+		btc->manual_ctrl = rtw88_btc_manual_sticky();
+		if (btc->manual_ctrl) {
+			/* Feixiao wifi-only: no macOS driver feeds the BT half,
+			 * so the coex TDMA cycle pauses the TX scheduler via
+			 * register-H2C against a silent partner until the whole
+			 * H2C pipe wedges.  Keep the algorithm in manual mode. */
+			if (ver->fcxctrl == 7)
+				btc->ctrl.ctrl_v7.manual = true;
+			else
+				btc->ctrl.ctrl.manual = true;
+		}
 		if (ver->fcxctrl != 7)
 			btc->ctrl.ctrl.trace_step = FCXDEF_STEP;
 	}

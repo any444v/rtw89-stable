@@ -257,11 +257,24 @@ void rtw88_sw_scan_complete(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
  * efuse.btcoex flag; the equivalent is BTC manual control, which stops
  * the periodic coex algorithm from reacting to (never-arriving) BT
  * firmware replies.  Same mechanism as debugfs' btc_manual node. */
+static bool feixiao_wifi_only;
+
+/* coex.c re-applies manual control after every BTC reset (ntfy_init at
+ * each ops->start wipes it) as long as this reads true. */
+bool rtw88_btc_manual_sticky(void)
+{
+	return feixiao_wifi_only;
+}
+
 void rtw88_force_wifi_only(void)
 {
 	struct ieee80211_hw *hw = rtw88_get_hw();
 	struct rtw89_dev *rtwdev;
 	struct rtw89_btc *btc;
+
+	/* Sticky: the kext may call this before rtw_pci_probe registers the
+	 * hw — record the request first so BTC init picks it up later. */
+	feixiao_wifi_only = true;
 
 	if (!hw || !hw->priv)
 		return;
