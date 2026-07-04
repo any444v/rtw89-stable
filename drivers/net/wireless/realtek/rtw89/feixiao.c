@@ -15,6 +15,7 @@
 
 #include "cam.h"
 #include "chan.h"
+#include "coex.h"
 #include "core.h"
 #include "debug.h"
 #include "fw.h"
@@ -259,9 +260,9 @@ void rtw88_sw_scan_complete(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
  * firmware replies.  Same mechanism as debugfs' btc_manual node. */
 static bool feixiao_wifi_only;
 
-/* coex.c re-applies manual control after every BTC reset (ntfy_init at
- * each ops->start wipes it) as long as this reads true. */
-bool rtw88_btc_manual_sticky(void)
+/* core.c boots BTC in BTC_MODE_WL (wifi-only policy) at every
+ * ops->start while this reads true. */
+bool rtw88_btc_wifi_only(void)
 {
 	return feixiao_wifi_only;
 }
@@ -269,25 +270,17 @@ bool rtw88_btc_manual_sticky(void)
 void rtw88_force_wifi_only(void)
 {
 	struct ieee80211_hw *hw = rtw88_get_hw();
-	struct rtw89_dev *rtwdev;
-	struct rtw89_btc *btc;
 
 	/* Sticky: the kext may call this before rtw_pci_probe registers the
-	 * hw — record the request first so BTC init picks it up later. */
+	 * hw; record the request first, rtw89_core_start applies it via
+	 * rtw89_btc_ntfy_init(BTC_MODE_WL). */
 	feixiao_wifi_only = true;
 
-	if (!hw || !hw->priv)
-		return;
-	rtwdev = to_rtw89(hw->priv);
-	btc = &rtwdev->btc;
+	if (hw && hw->priv &&
+	    test_bit(RTW89_FLAG_RUNNING, to_rtw89(hw->priv)->flags))
+		rtw89_btc_ntfy_init(to_rtw89(hw->priv), BTC_MODE_WL);
 
-	btc->manual_ctrl = true;
-	if (btc->ver && btc->ver->fcxctrl == 7)
-		btc->ctrl.ctrl_v7.manual = true;
-	else
-		btc->ctrl.ctrl.manual = true;
-
-	pr_info("rtw89: forcing wifi-only (BTC manual control)\n");
+	pr_info("rtw89: forcing wifi-only (BTC_MODE_WL)\n");
 }
 
 /* Single STA chanctx emulating mac80211's add/assign flow (the kext
