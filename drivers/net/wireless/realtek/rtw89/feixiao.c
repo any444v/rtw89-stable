@@ -171,6 +171,101 @@ void rtw88_debug_dump_tx_state(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  A-MPDU BlockAck hardware setup                                      */
+/*                                                                     */
+/*  The Feixiao kext runs the ADDBA/DELBA handshake over the air but    */
+/*  cannot call mac80211's ampdu_action op: rtw89_ops_ampdu_action      */
+/*  dereferences sta->txq[tid]->drv_priv, and this port never           */
+/*  allocates per-TID txqs.  We instead call the rtw89 H2C helpers      */
+/*  directly with the negotiated parameters — TX_OPERATIONAL programs   */
+/*  the per-TID CMAC aggregation table, RX_START/STOP the BA CAM.       */
+/*  Without these the MAC aggregates frames (tagged TX_CTL_AMPDU by the */
+/*  kext) against an unconfigured CMAC/BA CAM, and the AMPDU engine      */
+/*  desyncs under load → frozen TX bd ring / "no tx fwcmd resource".    */
+
+int rtw88_tx_ampdu_start(struct ieee80211_vif *vif, struct ieee80211_sta *sta,
+			 u8 tid, u16 agg_num)
+{
+	struct ieee80211_hw *hw = rtw88_get_hw();
+	struct rtw89_dev *rtwdev;
+	struct rtw89_sta *rtwsta;
+	struct rtw89_vif *rtwvif;
+
+	if (!hw || !hw->priv || !vif || !sta || tid >= IEEE80211_NUM_TIDS)
+		return -EINVAL;
+
+	rtwdev = to_rtw89(hw->priv);
+	rtwsta = sta_to_rtwsta(sta);
+	rtwvif = vif_to_rtwvif(vif);
+
+	/* Mirror rtw89_ops_ampdu_action(TX_OPERATIONAL) minus the txq flag. */
+	rtwsta->ampdu_params[tid].agg_num = agg_num;
+	rtwsta->ampdu_params[tid].amsdu = false;
+	set_bit(tid, rtwsta->ampdu_map);
+
+	return rtw89_chip_h2c_ampdu_cmac_tbl(rtwdev, rtwvif, rtwsta);
+}
+
+void rtw88_tx_ampdu_stop(struct ieee80211_vif *vif, struct ieee80211_sta *sta,
+			 u8 tid)
+{
+	struct ieee80211_hw *hw = rtw88_get_hw();
+	struct rtw89_dev *rtwdev;
+	struct rtw89_sta *rtwsta;
+	struct rtw89_vif *rtwvif;
+
+	if (!hw || !hw->priv || !vif || !sta || tid >= IEEE80211_NUM_TIDS)
+		return;
+
+	rtwdev = to_rtw89(hw->priv);
+	rtwsta = sta_to_rtwsta(sta);
+	rtwvif = vif_to_rtwvif(vif);
+
+	clear_bit(tid, rtwsta->ampdu_map);
+	rtw89_chip_h2c_ampdu_cmac_tbl(rtwdev, rtwvif, rtwsta);
+}
+
+int rtw88_rx_ampdu_start(struct ieee80211_sta *sta, u8 tid, u16 ssn,
+			 u16 buf_size)
+{
+	struct ieee80211_hw *hw = rtw88_get_hw();
+	struct ieee80211_ampdu_params params;
+	struct rtw89_dev *rtwdev;
+
+	if (!hw || !hw->priv || !sta || tid >= IEEE80211_NUM_TIDS)
+		return -EINVAL;
+
+	rtwdev = to_rtw89(hw->priv);
+
+	/* h2c_ba_cam reads only tid/ssn/buf_size from params (never sta->txq). */
+	memset(&params, 0, sizeof(params));
+	params.sta = sta;
+	params.tid = tid;
+	params.ssn = ssn;
+	params.buf_size = buf_size;
+
+	return rtw89_chip_h2c_ba_cam(rtwdev, sta_to_rtwsta(sta), true, &params);
+}
+
+void rtw88_rx_ampdu_stop(struct ieee80211_sta *sta, u8 tid)
+{
+	struct ieee80211_hw *hw = rtw88_get_hw();
+	struct ieee80211_ampdu_params params;
+	struct rtw89_dev *rtwdev;
+
+	if (!hw || !hw->priv || !sta || tid >= IEEE80211_NUM_TIDS)
+		return;
+
+	rtwdev = to_rtw89(hw->priv);
+
+	memset(&params, 0, sizeof(params));
+	params.sta = sta;
+	params.tid = tid;
+
+	rtw89_chip_h2c_ba_cam(rtwdev, sta_to_rtwsta(sta), false, &params);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Scan bridges                                                       */
 /* ------------------------------------------------------------------ */
 
