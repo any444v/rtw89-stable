@@ -2873,7 +2873,9 @@ static void rtw89_core_bcn_track_assoc(struct rtw89_dev *rtwdev,
 	rcu_read_lock();
 	bss_conf = rtw89_vif_rcu_dereference_link(rtwvif_link, true);
 	beacon_int = bss_conf->beacon_int ?: 100;
-	dtim = bss_conf->dtim_period;
+	/* The Feixiao kext may not know the DTIM period at assoc time;
+	 * 0 here means a divide-by-zero below. */
+	dtim = bss_conf->dtim_period ?: 1;
 	rcu_read_unlock();
 
 	beacons_in_period = period / beacon_int / dtim;
