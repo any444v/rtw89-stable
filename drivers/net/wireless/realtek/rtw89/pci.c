@@ -975,14 +975,29 @@ static irqreturn_t rtw89_pci_interrupt_threadfn(int irq, void *dev)
 	rtw89_chip_recognize_intrs(rtwdev, rtwpci, &isrs);
 	spin_unlock_irqrestore(&rtwpci->irq_lock, flags);
 
-	if (unlikely(isrs.isrs[0] & isr_def->isr_rdu))
+	/* feixiao diagnostic: the firmware wedges ~20-45s after association
+	 * (no tx fwcmd resource) and never recovers.  Surface the hardware's
+	 * error path at warn level so the next dmesg shows *why*: RDU means the
+	 * host RX ring starved (we are not replenishing fast enough / RX DMA
+	 * stalled); a HALT/WDT c2h with an err_status means the MAC firmware
+	 * asserted (the code identifies which subsystem). */
+	if (unlikely(isrs.isrs[0] & isr_def->isr_rdu)) {
+		rtw89_warn(rtwdev, "feixiao: RDU rx-desc unavailable isr0=0x%08x\n",
+			   isrs.isrs[0]);
 		rtw89_pci_isr_rxd_unavail(rtwdev, rtwpci);
+	}
 
-	if (unlikely(isrs.halt_c2h_isrs & isr_def->isr_halt_c2h))
-		rtw89_ser_notify(rtwdev, rtw89_mac_get_err_status(rtwdev));
+	if (unlikely(isrs.halt_c2h_isrs & isr_def->isr_halt_c2h)) {
+		u32 err = rtw89_mac_get_err_status(rtwdev);
 
-	if (unlikely(isrs.halt_c2h_isrs & isr_def->isr_wdt_timeout))
+		rtw89_warn(rtwdev, "feixiao: FW HALT c2h err_status=0x%08x\n", err);
+		rtw89_ser_notify(rtwdev, err);
+	}
+
+	if (unlikely(isrs.halt_c2h_isrs & isr_def->isr_wdt_timeout)) {
+		rtw89_warn(rtwdev, "feixiao: FW watchdog timeout\n");
 		rtw89_ser_notify(rtwdev, MAC_AX_ERR_L2_ERR_WDT_TIMEOUT_INT);
+	}
 
 	if (unlikely(isrs.halt_c2h_isrs & isr_def->isr_sps_ocp))
 		rtw89_warn(rtwdev, "SPS OCP alarm 0x%x\n", isrs.halt_c2h_isrs);
