@@ -32,8 +32,17 @@
 extern void *g_irq_dev_id;                       /* rtw89_dev of active IRQ */
 extern struct ieee80211_hw *rtw88_get_hw(void);
 
-/* Track-work kill switch consumed by core.c (macOS diagnostic patch). */
-bool rtw89_disable_track_work;
+/* Track-work kill switch consumed by core.c (macOS diagnostic patch).
+ *
+ * Enabled: the 2 s periodic track_work runs only *after association* its
+ * STA-specific RF-dynamic routines (RA/DIG/CFO/BF-monitor/beacon-track/RFK).
+ * These are the prime suspect for the "no tx fwcmd resource" wedge that hits a
+ * few seconds after connect and kills DHCP (the first post-assoc track_work
+ * fires ~2 s in, before DHCP completes; the fwcmd ring exhausts ~40 s later).
+ * Set true to bypass all of it and confirm whether periodic RF work is the
+ * cause; if the link then stays alive and DHCP succeeds, bisect the routines
+ * in rtw89_track_work() to find the offender. */
+bool rtw89_disable_track_work = true;
 
 /* ------------------------------------------------------------------ */
 /*  PCI probe/remove                                                   */
