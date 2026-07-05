@@ -7943,6 +7943,25 @@ static int rtw89_fw_write_h2c_reg(struct rtw89_dev *rtwdev,
 				rtwdev, chip->h2c_ctrl_reg);
 	if (ret) {
 		rtw89_warn(rtwdev, "FW does not process h2c registers\n");
+		/* feixiao diagnostic: the firmware stops answering ~30 s after
+		 * association with no halt/watchdog interrupt (the SER path never
+		 * fires).  Probe the MAC error register directly (bounded 100 ms
+		 * poll) the first time we detect the wedge.  If the firmware
+		 * asserted, R_AX_HALT_C2H is set and get_err_status dumps the
+		 * scenario/code; if it merely stopped answering (power state /
+		 * host access issue), the probe logs "Polling FW err status fail".
+		 * Either way the next dmesg finally says which.  Fires once so the
+		 * per-retry flood does not stack 100 ms polls. */
+		{
+			static bool feixiao_err_probed;
+
+			if (!feixiao_err_probed) {
+				feixiao_err_probed = true;
+				rtw89_warn(rtwdev,
+					   "feixiao: probing FW err status after wedge\n");
+				rtw89_mac_get_err_status(rtwdev);
+			}
+		}
 		return ret;
 	}
 
