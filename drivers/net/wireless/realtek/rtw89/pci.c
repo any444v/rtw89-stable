@@ -72,6 +72,13 @@ static int rtw89_pci_rst_bdram_ax(struct rtw89_dev *rtwdev)
 	return ret;
 }
 
+/* feixiao diagnostics: host-side RX/NAPI liveness counters, dumped by the CH12
+ * fwcmd wedge probe below so the next log shows whether the host is still
+ * servicing the device when the firmware stops consuming H2C. */
+static u32 feixiao_napi_polls;
+static u32 feixiao_rx_delivered;
+static u32 feixiao_rpq_reports;
+
 static u32 rtw89_pci_dma_recalc(struct rtw89_dev *rtwdev,
 				struct rtw89_pci_dma_ring *bd_ring,
 				u32 cur_idx, bool tx)
@@ -442,6 +449,7 @@ static void rtw89_pci_rxbd_deliver(struct rtw89_dev *rtwdev,
 		}
 
 		cnt -= rx_cnt;
+		feixiao_rx_delivered += rx_cnt;
 	}
 
 	rtw89_write16(rtwdev, bd_ring->addr.idx, bd_ring->wp);
@@ -747,6 +755,7 @@ static int rtw89_pci_poll_rpq_dma(struct rtw89_dev *rtwdev,
 		goto out_unlock;
 
 	rtw89_pci_release_tx(rtwdev, rx_ring, cnt);
+	feixiao_rpq_reports += cnt;
 
 out_unlock:
 	spin_unlock_bh(&rtwpci->trx_lock);
@@ -1282,11 +1291,30 @@ u32 __rtw89_pci_check_and_reclaim_tx_fwcmd_resource(struct rtw89_dev *rtwdev)
 
 		if ((feixiao_full_n++ & 0x1f) == 0) {
 			struct rtw89_pci_dma_ring *bd = &tx_ring->bd_ring;
+			struct rtw89_pci_rx_ring *rxq =
+				&rtwpci->rx.rings[RTW89_RXCH_RXQ];
+			struct rtw89_pci_rx_ring *rpq =
+				&rtwpci->rx.rings[RTW89_RXCH_RPQ];
 
 			rtw89_warn(rtwdev,
 				   "feixiao: CH12 full wp=%u rp=%u len=%u hwidx=0x%08x\n",
 				   bd->wp, bd->rp, bd->len,
 				   rtw89_read32(rtwdev, bd->addr.idx));
+			/* Pin the first domino: is the host still servicing the
+			 * device when the FW stops consuming H2C?  napi=poll
+			 * invocations, rx=frames delivered, rpq=tx reports reaped
+			 * (all since boot).  If napi/rx are FROZEN across dumps the
+			 * host went deaf (interrupt masked / NAPI stalled).  RXQ reg
+			 * showing the ring full (hw_idx+1 == host_idx) means we
+			 * stopped replenishing and the FW RX ring starved. */
+			rtw89_warn(rtwdev,
+				   "feixiao: host napi=%u rx=%u rpq=%u | RXQ wp=%u rp=%u reg=0x%08x | RPQ wp=%u rp=%u reg=0x%08x\n",
+				   feixiao_napi_polls, feixiao_rx_delivered,
+				   feixiao_rpq_reports,
+				   rxq->bd_ring.wp, rxq->bd_ring.rp,
+				   rtw89_read32(rtwdev, rxq->bd_ring.addr.idx),
+				   rpq->bd_ring.wp, rpq->bd_ring.rp,
+				   rtw89_read32(rtwdev, rpq->bd_ring.addr.idx));
 		}
 	}
 
@@ -4544,6 +4572,7 @@ static int rtw89_pci_napi_poll(struct napi_struct *napi, int budget)
 	int work_done;
 
 	rtwdev->napi_budget_countdown = budget;
+	feixiao_napi_polls++;
 
 	rtw89_write32(rtwdev, isr_def->isr_clear_rpq.addr, isr_def->isr_clear_rpq.data);
 	work_done = rtw89_pci_poll_rpq_dma(rtwdev, rtwpci, rtwdev->napi_budget_countdown);
