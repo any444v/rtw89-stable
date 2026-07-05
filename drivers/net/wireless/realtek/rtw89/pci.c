@@ -1271,6 +1271,25 @@ u32 __rtw89_pci_check_and_reclaim_tx_fwcmd_resource(struct rtw89_dev *rtwdev)
 	cnt = rtw89_pci_get_avail_txbd_num(tx_ring);
 	spin_unlock_bh(&rtwpci->trx_lock);
 
+	/* feixiao diagnostic: the CH12 (fwcmd/H2C) ring goes to zero avail ~24s
+	 * after connect and never recovers, with the firmware not asserting.
+	 * Reclaim advances bd_ring->rp from the raw hardware index register; dump
+	 * wp/rp/len and that raw register periodically while the ring is full so
+	 * the next log shows whether the hardware index is FROZEN (firmware
+	 * stopped consuming H2C) or still ADVANCING (a host-side reclaim bug). */
+	if (cnt == 0) {
+		static u32 feixiao_full_n;
+
+		if ((feixiao_full_n++ & 0x1f) == 0) {
+			struct rtw89_pci_dma_ring *bd = &tx_ring->bd_ring;
+
+			rtw89_warn(rtwdev,
+				   "feixiao: CH12 full wp=%u rp=%u len=%u hwidx=0x%08x\n",
+				   bd->wp, bd->rp, bd->len,
+				   rtw89_read32(rtwdev, bd->addr.idx));
+		}
+	}
+
 	return cnt;
 }
 
